@@ -6,7 +6,7 @@ from pyspark.sql.functions import month, year
 import numpy as np
 import matplotlib.pyplot as plt
 import distinctipy
-from math import ceil
+from math import ceil, sqrt
 import pickle
 import json
 import time
@@ -106,7 +106,6 @@ def main():
     print_mse_and_results(test_preds, test_acts, 10)
     markov_chain.save_instance(test_saved_model_path)
 
-
 def print_mse_and_results(preds, acts, print_every):
     print("Sample index: <predicted load> vs. <actual load> (<percentage diff> %)")
     if print_every > 0:
@@ -114,7 +113,10 @@ def print_mse_and_results(preds, acts, print_every):
             if i % print_every == 0:
                 print(f"{i}: {pred:.2f} vs. {acts[i]:.2f} ({abs(pred - acts[i]) / acts[i] * 100:.2f} % diff)")
     mse_markov = mean_squared_error(acts, preds)
-    print(f"MSE Markov Chain while predicting one sample ahead during training = {mse_markov}.\n")
+    rmse_markov = sqrt(mse_markov)
+    print()
+    print(f"MSE = {mse_markov}")
+    print(f"RMSE = {rmse_markov}")
 
 
 def get_array_from_db():
@@ -124,14 +126,19 @@ def get_array_from_db():
     mongo_data = retrieve_data(collection)
     end_time = time.time()
     execution_time = end_time - start_time
-    print(f"Finished in {execution_time:.3f} seconds.")
+    print(f"DB retrieval finished in {execution_time:.3f} seconds.")
 
+    print(f"Pre-processing data.")
+    start_time = time.time()
     pandas_df = convert_data_to_dataframe(mongo_data)
     drop_dataframe_column('_id', pandas_df)
     spark = init_spark_session()
     spark_df = convert_pandas_df_to_spark(spark, pandas_df)
     df_month_year = modify_spark_dataframe(spark_df)
     array = convert_spark_df_to_numpy(df_month_year)
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f"Data pre-processing finished in {execution_time:.3f} seconds.")
     spark.stop()
     return array
 
@@ -200,16 +207,19 @@ def modify_spark_dataframe(spark_df):
     # Assuming spark_df is a Spark DataFrame
     # Keep only the columns 'datetime' and 'DEMAND'
     df = spark_df.select('datetime', 'DEMAND')
-
+    
     # Change column 'datetime' to type datetime
     df = df.withColumn('datetime', df['datetime'].cast('timestamp'))
 
+    # NEW LINE FOR TESTING ERROR
+    df_sorted = df.sort(['datetime'])
+
     # Add new columns with month and year
-    df_month_year = df.withColumn('month', month('datetime')).withColumn('year', year('datetime'))
+    df_month_year = df_sorted.withColumn('month', month('datetime')).withColumn('year', year('datetime'))
 
     # Drop the 'datetime' column since it's no longer needed
     df_month_year = df_month_year.drop('datetime')
-
+   
     return df_month_year
 
 
@@ -260,7 +270,7 @@ def plot_results_for_values_m(save_path, ms, array):
     plt.xlabel("M values")
     plt.ylabel("Load values")
     plt.savefig(save_path + ".png", format='png')
-    # plt.show()
+    plt.show()
     plt.clf()
     return total_number_samples
 
@@ -272,7 +282,7 @@ def plot_hist_of_reduced(save_path, total_number_samples, array_no_outliers):
     plt.xlabel("Load values")
     plt.ylabel("Number of samples")
     plt.savefig(save_path + ".png", format='png')
-    # plt.show()
+    plt.show()
     plt.clf()
 
 
@@ -316,14 +326,21 @@ def get_changes_five_summary_stats(negative_changes, positive_changes):
 def plot_change_summaries(save_path, total_number_samples, negative_changes, no_changes, positive_changes,
                           neg_min_value, neg_q1, neg_q2, neg_q3, neg_max_value,
                           pos_min_value, pos_q1, pos_q2, pos_q3, pos_max_value):
+
     # Set the number of bins for the histogram
     num_bins = ceil(total_number_samples / 10)
-
+    if num_bins > 500:
+        num_bins = 500
+    
     # Create a histogram of the array
-    plt.hist(negative_changes, bins=num_bins, color='darkred', alpha=0.5, label='Negative Changes')
-    plt.hist(positive_changes, bins=num_bins, color='darkgreen', alpha=0.5, label='Positive Changes')
-    plt.hist(no_changes, bins=num_bins, color='gray', alpha=0.5, label='No Changes')
-
+    n_neg, bins_neg, patches_neg = plt.hist(negative_changes, bins=num_bins, color='darkred', alpha=0.5, label='Negative Changes')
+    n_no, bins_no, patches_no = plt.hist(no_changes, bins=num_bins, color='gray', alpha=0.5, label='No Changes')
+    n_pos, bins_pos, patches_pos = plt.hist(positive_changes, bins=num_bins, color='darkgreen', alpha=0.5, label='Positive Changes')
+    
+    max_bin_height = max(max(n_neg), max(n_no), max(n_pos))
+    # plt.ylim(0, max_bin_height * 1.1)
+    plt.ylim(0, 500)  # hard coding b/c plotting y range way too big for some reason
+    
     # Create vertical lines at each of Five-number summary
     neg_line_color = 'orange'
     plt.axvline(x=neg_min_value, color=neg_line_color)
@@ -341,15 +358,14 @@ def plot_change_summaries(save_path, total_number_samples, negative_changes, no_
     plt.axvline(x=pos_q2, color=pos_line_color)
     plt.axvline(x=pos_q3, color=pos_line_color)
     plt.axvline(x=pos_max_value, color=pos_line_color)
-
+    
     # Label plot
     plt.title("Histogram of all load changes")
     plt.xlabel("Load change values")
     plt.ylabel("Number of samples")
     plt.legend()
-
     plt.savefig(save_path + ".png", format='png')
-    # plt.show()
+    plt.show()
     plt.clf()
 
 
@@ -633,7 +649,6 @@ def plot_preds_versus_acts(save_path, array, preds, acts):
     plt.savefig(save_path + ".png", format='png')
     # plt.show()
     plt.clf()
-
 
 if __name__ == "__main__":
     main()
