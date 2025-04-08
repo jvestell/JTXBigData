@@ -102,19 +102,4 @@ plt.grid(True)
 plt.show()
 ```
 
-## Directory Structure
-```
-electricity-load-prediction/
-├── data/
-│   ├── train_dataframes.xlsx
-│   ├── test_dataframes.xlsx
-├── notebooks/
-│   ├── model_training.ipynb
-│   ├── model_evaluation.ipynb
-├── src/
-│   ├── preprocessing.py
-│   ├── models.py
-│   ├── evaluation.py
-├── README.md
-├── requirements.txt
 ```
